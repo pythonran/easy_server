@@ -2,6 +2,7 @@ import os
 import select
 import tox
 from utils import Configurable
+from loop import _kqueue, _select
 
 class eventLoop(object):
     EPOLLERR = 8
@@ -35,10 +36,11 @@ class eventLoop(object):
         self.loop = None
         if hasattr(select, "epoll"):
             self.loop = select.epoll
-        elif hasattr(select, "poll"):
-            self.loop = select.poll
+        elif hasattr(select, "kqueue"):
+
+            self.loop = _kqueue._KQueue
         else:
-            self.loop = select.select
+            self.loop = _select._Select
 
     def __call__(self, *args, **kwargs):
 

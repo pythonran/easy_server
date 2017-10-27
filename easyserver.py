@@ -26,20 +26,23 @@ class easyHandler():
 
 
 class easyHttpServer(object):
-    def __init__(self):
+    def __init__(self, addrs):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 6)
+        self.sock.bind(addrs)
+        self.sock.listen(1)
+
         pass
     pass
 
 class esayLoop():
     pass
 
-def run(environ, start_response):
-    # server = easyHttpServer()
+def run(addr, handler):
     res = socket.getaddrinfo("0.0.0.0",8000)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 6)
     sock.bind(("0.0.0.0",8000))
     sock.listen(1)
-    my_accept(sock, 6, daemon=False)
+
 
 @async
 def my_accept(sock, proto, daemon=False):

@@ -19,7 +19,6 @@ def async(fun):
     @wraps(fun)
     def inner(*args, **kwargs):
         thread = threading.Thread(target=fun, args=args, kwargs=kwargs)
-        print args
         thread.daemon = kwargs["daemon"]
         thread.start()
         return str(thread.ident) + "_" + thread.name
