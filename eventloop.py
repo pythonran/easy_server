@@ -32,24 +32,29 @@ class eventLoop(object):
     POLLWRBAND = 512
     POLLWRNORM = 256
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, sock=None):
         self.loop = None
         if hasattr(select, "epoll"):
-            self.loop = select.epoll
+            self.loop = select.epoll()
         elif hasattr(select, "kqueue"):
-
-            self.loop = _kqueue._KQueue
+            self.loop = _kqueue._KQueue()
         else:
-            self.loop = _select._Select
+            self.loop = _select._Select()
+        if sock:
+            self.add_event(self.EPOLLIN)
 
     def __call__(self, *args, **kwargs):
 
         pass
 
     def add_event(self, fd, event):
-        event_loop = self.loop()
-        event_loop.register(fd, event)
-        pass
+        self.loop.register(fd, event)
+
+    def update_event(self, fd, event):
+        self.loop.modify(fd, event)
+
+    def remove_event(self, fd):
+        self.loop.unregister(fd)
 
 if __name__ == "__main__":
     loop = eventLoop()
