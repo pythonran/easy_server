@@ -4,7 +4,9 @@ import os
 import sys
 from eventloop import eventLoop
 from utils import async
+import Queue
 
+from handle_pool import  ThreadPool
 
 
 handler_proto_event = {
@@ -12,27 +14,61 @@ handler_proto_event = {
 
 }
 
+default_request_version = "HTTP/0.9"
+protocol_version = "HTTP/1.0"
+
+class easyRequest():
+    pass
+
+class easyResponse():
+    def __init__(self, content_type, charset):
+        self._headers = {}
+        self._headers["Server"] = "easysever/1.0"
+        self._headers["Content-type"] = content_type + ";" + charset
+        pass
+
+    __repr__ = lambda self: self._headers
+    __getitem__ = lambda self, header: self._headers[header]
+    __setitem__ = lambda self, header, value: self._headers.update(header=value)
+
+    def set_cookie(self):
+        pass
+    pass
 
 class easyHandler():
-
-    def IPPROTO_IP(self):
+    @staticmethod
+    def send_error(code, response):
         pass
 
-    def IPPROTO_UDP(self):
-        pass
+    def method_notallowed(self):
+        """
 
-    def IPPROTO_TCP(self):
+        :rtype: object
+        """
+        status_code = 405
+        return ""
         pass
 
 
 class easyHttpServer(object):
+
+
     def __init__(self, addrs):
         self.listensock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 6)
         self.listensock.bind(addrs)
         self.listensock.listen(1)
+        self.url_view = Queue.Queue()
+        self.__response = {}
+        self.init_url_view(self.url_view)
         self.fd_to_socket = {str(self.listensock.fileno()): self.listensock}
         self.IOloop = eventLoop(self.listensock)
+        self.thread_pool = ThreadPool(2)
         self.start()
+
+    def init_url_view(self, url_view_queue):
+        from urls import URLMAPS
+        for url, view_func in URLMAPS.items():
+            self.url_view.put((url, view_func))
 
     def start(self):
         while True:
@@ -57,7 +93,7 @@ class easyHttpServer(object):
                     # 把新连接的文件句柄以及对象保存到字典
                     self.fd_to_socket[connection.fileno()] = connection
                     # 以新连接的对象为键值，值存储在队列中，保存每个连接的信息
-                    # message_queues[connection] = Queue.Queue()
+                    self.__response[connection] = Queue.Queue()
                 # 关闭事件
                 elif event & self.IOloop.EPOLLHUP:
                     print 'client close'
@@ -70,31 +106,24 @@ class easyHttpServer(object):
                 # 可读事件
                 elif event & self.IOloop.EPOLLIN:
                     # 接收数据
-                    data = sock.recv(1024)
-                    # data = sock.makefile("r")
-                    if data:
-                        print "收到数据：", data, "客户端：", sock.getpeername()
-                        # 将数据放入对应客户端的字典
-                        message_queues[sock].put(
-                            "HTTP/1.0 200 OK\r\nheaders:1\r\nContent-Length:16000\r\n\r\n{}\r\n\r\n".format(
-                                "r" * 16000))
-                        # 修改读取到消息的连接到等待写事件集合(即对应客户端收到消息后，再将其fd修改并加入写事件集合)
-                        self.IOloop.loop.modify(fd, select.EPOLLOUT)
-                    else:
-                        self.IOloop.loop.modify(fd, select.EPOLLHUP)
+                    # data = sock.recv(1024)
+                    self.thread_pool.queueTask(process_request, args=(self, fd, sock))
+
                 # 可写事件
                 elif event & self.IOloop.EPOLLOUT:
                     try:
                         # 从字典中获取对应客户端的信息
-                        msg = message_queues[sock].get_nowait()
+                        # msg = self.__response[sock].get_nowait()
+                        self.thread_pool.queueTask(process_response(), args=(self, fd, sock))
                     except Queue.Empty:
                         print sock.getpeername(), " queue empty"
                         # 修改文件句柄为读事件
-                        self.IOloop.loop.modify(fd, select.EPOLLHUP)
+                        # self.IOloop.loop.modify(fd, self.IOloop.EPOLLHUP)
                     else:
-                        print "发送数据：", msg, "客户端：", sock.getpeername()
+                        pass
+                        # print "发送数据：", msg, "客户端：", sock.getpeername()
                         # 发送数据
-                        sock.send(msg)
+                        # sock.send(msg)
                 else:
                     print "event:", event
                     # 在epoll中注销服务端监听文件句柄
@@ -105,79 +134,102 @@ class easyHttpServer(object):
                     self.listensock.close()
             pass
         pass
-class esayLoop():
+
+def process_request(self, fd, sock):
+    data = sock.makefile("r")
+    first_line = data.readline()
+    if parse_request(first_line):
+        parse_headers(data)
+    if first_line:
+        print "收到请求：", first_line, "客户端：", sock.getpeername()
+        self.__response[sock].put()
+        self.IOloop.loop.modify(fd, self.IOloop.EPOLLOUT)
+    else:
+        self.IOloop.loop.modify(fd, self.IOloop.EPOLLHUP)
+
+
+def process_response():
     pass
 
 
-def run(addr, handler):
+def parse_request(first_line):
+    """Parse a request (internal).
+
+                The request should be stored in self.raw_requestline; the results
+                are in self.command, self.path, self.request_version and
+                self.headers.
+
+                Return True for success, False for failure; on failure, an
+                error is sent back.
+
+    """
+    command = None  # set in case of error on the first line
+    request_version = version = default_request_version
+    close_connection = 1
+    requestline = first_line
+    path = ""
+    requestline = requestline.rstrip('\r\n')
+    words = requestline.split()
+    if len(words) == 3:
+        command, path, version = words
+        if version[:5] != 'HTTP/':
+            easyHandler.send_error(400, "Bad request version (%r)" % version)
+            return False
+        try:
+            base_version_number = version.split('/', 1)[1]
+            version_number = base_version_number.split(".")
+            # RFC 2145 section 3.1 says there can be only one "." and
+            #   - major and minor numbers MUST be treated as
+            #      separate integers;
+            #   - HTTP/2.4 is a lower version than HTTP/2.13, which in
+            #      turn is lower than HTTP/12.3;
+            #   - Leading zeros MUST be ignored by recipients.
+            if len(version_number) != 2:
+                raise ValueError
+            version_number = int(version_number[0]), int(version_number[1])
+        except (ValueError, IndexError):
+            easyHandler.send_error(400, "Bad request version (%r)" % version)
+            return False
+        if version_number >= (1, 1) and protocol_version >= "HTTP/1.1":
+            close_connection = 0
+        if version_number >= (2, 0):
+            easyHandler.send_error(505,
+                            "Invalid HTTP Version (%s)" % base_version_number)
+            return False
+    elif len(words) == 2:
+        command, path = words
+        close_connection = 1
+        if command != 'GET':
+            easyHandler.send_error(400, "Bad HTTP/0.9 request type (%r)" % command)
+            return False
+    elif not words:
+        return False
+    else:
+        easyHandler.send_error(400, "Bad request syntax (%r)" % requestline)
+        return command, path, version
+    return True
+
+def parse_headers(headerfile):
+    _headers = {}
+    line = headerfile.readline()
+    if line == "\r\n" or not line:
+        return False
+    _headers.update({line.split(":")[0]: line.split(":")[1]})
     while True:
-        print "等待活动连接......"
-        # 轮询注册的事件集合，返回值为[(文件句柄，对应的事件)，(...),....]
-        events = epoll.poll(timeout)
-        if not events:
-            print "epoll超时无活动连接，重新轮询......"
-            continue
-        print "有", len(events), "个新事件，开始处理......"
-        print events
-        for fd, event in events:
-            sock = fd_to_socket[fd]
-            # 如果活动socket为当前服务器socket，表示有新连接
-            if sock == serversocket:
-                connection, address = serversocket.accept()
-                print "新连接：", address
-                # 新连接socket设置为非阻塞
-                connection.setblocking(False)
-                # 注册新连接fd到待读事件集合
-                epoll.register(connection.fileno(), select.EPOLLIN)
-                # 把新连接的文件句柄以及对象保存到字典
-                fd_to_socket[connection.fileno()] = connection
-                # 以新连接的对象为键值，值存储在队列中，保存每个连接的信息
-                message_queues[connection] = Queue.Queue()
-            # 关闭事件
-            elif event & select.EPOLLHUP:
-                print 'client close'
-                # 在epoll中注销客户端的文件句柄
-                epoll.unregister(fd)
-                # 关闭客户端的文件句柄
-                fd_to_socket[fd].close()
-                # 在字典中删除与已关闭客户端相关的信息
-                del fd_to_socket[fd]
-            # 可读事件
-            elif event & select.EPOLLIN:
-                # 接收数据
-                data = sock.recv(1024)
-                # data = sock.makefile("r")
-                if data:
-                    print "收到数据：", data, "客户端：", sock.getpeername()
-                    # 将数据放入对应客户端的字典
-                    message_queues[sock].put(
-                        "HTTP/1.0 200 OK\r\nheaders:1\r\nContent-Length:16000\r\n\r\n{}\r\n\r\n".format(
-                            "r" * 16000))
-                    # 修改读取到消息的连接到等待写事件集合(即对应客户端收到消息后，再将其fd修改并加入写事件集合)
-                    epoll.modify(fd, select.EPOLLOUT)
-                else:
-                    epoll.modify(fd, select.EPOLLHUP)
-            # 可写事件
-            elif event & select.EPOLLOUT:
-                try:
-                    # 从字典中获取对应客户端的信息
-                    msg = message_queues[sock].get_nowait()
-                except Queue.Empty:
-                    print sock.getpeername(), " queue empty"
-                    # 修改文件句柄为读事件
-                    epoll.modify(fd, select.EPOLLHUP)
-                else:
-                    print "发送数据：", msg, "客户端：", sock.getpeername()
-                    # 发送数据
-                    sock.send(msg)
-            else:
-                print "event:", event
-                # 在epoll中注销服务端文件句柄
-                epoll.unregister(serversocket.fileno())
-                # 关闭epoll
-                epoll.close()
-                # 关闭服务器socket
-                serversocket.close()
+        line = headerfile.readline()
+        print line.split(":")
+        if line == "\r\n" or not line:
+            break
+        _headers.update({line.split(":")[0]: line.split(":")[1]})
+    return _headers
+
+def start_response(self):
+
+    pass
+
+
+class esayLoop():
+    pass
 
 
 @async

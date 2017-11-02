@@ -1,6 +1,9 @@
 import threading
 import Queue
 from time import sleep
+from threading import local
+
+_request = local()
 
 class ThreadPool(object):
     """Flexible thread pool class.  Creates a pool of threads, then
@@ -15,7 +18,6 @@ class ThreadPool(object):
         self.__resizeLock = threading.Condition(threading.Lock())
         self.__taskLock = threading.Condition(threading.Lock())
         self.__tasks = Queue.Queue()
-        self.__response = Queue.Queue()
         self.__isJoining = False
         self.setThreadCount(numThreads)
 
@@ -62,7 +64,7 @@ class ThreadPool(object):
         finally:
             self.__resizeLock.release()
 
-    def queueTask(self, task, args=None, taskCallback=None):
+    def queueTask(self, task, *args, **kwargs):
 
         """Insert a task into the queue.  task must be callable;
         args and taskCallback can be None."""
@@ -72,7 +74,7 @@ class ThreadPool(object):
         if not callable(task):
             return False
         try:
-            self.__tasks.put((task, args, taskCallback))
+            self.__tasks.put((task, args, kwargs))
             return True
         except Exception as exc:
             print str(exc)
@@ -144,14 +146,12 @@ class ThreadPoolThread(threading.Thread):
         it, calling the callback if any.  """
 
         while self.__isDying == False:
-            cmd, args, callback = self.__pool.getNextTask()
+            handle, args, kwargs = self.__pool.getNextTask()
             # If there's nothing to do, just sleep a bit
-            if cmd is None:
+            if handle is None:
                 sleep(ThreadPoolThread.threadSleepTime)
-            elif callback is None:
-                cmd(args)
             else:
-                self.__pool.__response.put(callback(cmd(args)))
+                handle(*args, **kwargs)
 
     def goAway(self):
 
