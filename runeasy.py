@@ -17,7 +17,7 @@ naiveip_re = re.compile(r"""^(?:
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('runserver', type=str, help='start the server host:post')
+    parser.add_argument('-r', '--runserver', type=str, help='start the server host:post')
     args = parser.parse_args()
     address = args.runserver
     if not address:
@@ -28,7 +28,8 @@ def parse_args():
 
 def main():
     addrs = parse_args()
-    app = easyHttpServer(addrs)
+    print addrs
+    app = easyHttpServer((addrs[0], int(addrs[1])))
     app.start()
 
 if __name__ == "__main__":

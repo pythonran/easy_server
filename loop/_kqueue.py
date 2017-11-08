@@ -1,5 +1,5 @@
 import select
-from eventloop import eventLoop
+# from eventloop import eventLoop
 
 class _KQueue(object):
     """A kqueue-based event loop for BSD/Mac systems."""
@@ -29,10 +29,10 @@ class _KQueue(object):
 
     def _control(self, fd, events, flags):
         kevents = []
-        if events & IOLoop.WRITE:
+        if events & select.EPOLLOUT:
             kevents.append(select.kevent(
                 fd, filter=select.KQ_FILTER_WRITE, flags=flags))
-        if events & IOLoop.READ:
+        if events & select.EPOLLIN:
             kevents.append(select.kevent(
                 fd, filter=select.KQ_FILTER_READ, flags=flags))
         # Even though control() takes a list, it seems to return EINVAL
@@ -46,7 +46,7 @@ class _KQueue(object):
         for kevent in kevents:
             fd = kevent.ident
             if kevent.filter == select.KQ_FILTER_READ:
-                events[fd] = events.get(fd, 0) | eventLoop.EPOLLIN
+                events[fd] = events.get(fd, 0) | select.EPOLLIN
             if kevent.filter == select.KQ_FILTER_WRITE:
                 if kevent.flags & select.KQ_EV_EOF:
                     # If an asynchronous connection is refused, kqueue
@@ -56,9 +56,9 @@ class _KQueue(object):
                     # Note that for read events, EOF may be returned before
                     # all data has been consumed from the socket buffer,
                     # so we only check for EOF on write events.
-                    events[fd] = IOLoop.ERROR
+                    events[fd] = select.EPOLLERR
                 else:
-                    events[fd] = events.get(fd, 0) | eventLoop.EPOLLOUT
+                    events[fd] = events.get(fd, 0) | select.EPOLLOUT
             if kevent.flags & select.KQ_EV_ERROR:
-                events[fd] = events.get(fd, 0) | eventLoop.EPOLLERR
+                events[fd] = events.get(fd, 0) | select.EPOLLERR
         return events.items()

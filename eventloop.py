@@ -35,13 +35,16 @@ class eventLoop(object):
     def __init__(self, sock=None):
         self.loop = None
         if hasattr(select, "epoll"):
+            print "now in epoll"
             self.loop = select.epoll()
         elif hasattr(select, "kqueue"):
+            print "now in kqueue"
             self.loop = _kqueue._KQueue()
         else:
+            print "now in select"
             self.loop = _select._Select()
         if sock:
-            self.add_event(self.EPOLLIN)
+            self.add_event(sock.fileno(), self.EPOLLIN)
 
     def __call__(self, *args, **kwargs):
 

@@ -72,14 +72,13 @@ class easyHttpServer(object):
         while True:
             print "等待活动连接......"
             # 轮询注册的事件集合，返回值为[(文件句柄，对应的事件)，(...),....]
-            events = self.IOloop.loop.poll(5)
+            events = self.IOloop.loop.poll(10)
             if not events:
                 print "epoll超时无活动连接，重新轮询......"
                 continue
             print "有", len(events), "个新事件，开始处理......"
-            print events
             for fd, event in events:
-                sock = self.fd_to_socket[fd]
+                sock = self.fd_to_socket[str(fd)]
                 # 如果活动socket为当前服务器socket，表示有新连接
                 if sock == self.listensock:
                     connection, address = self.listensock.accept()
@@ -94,7 +93,7 @@ class easyHttpServer(object):
                     self.__response[connection] = Queue.Queue()
                 # 关闭事件
                 elif event & self.IOloop.EPOLLHUP:
-                    print 'client close'
+                    print fd, 'client close'
                     # 在epoll中注销客户端的文件句柄
                     self.IOloop.loop.unregister(fd)
                     # 关闭客户端的文件句柄
@@ -119,19 +118,16 @@ class easyHttpServer(object):
                         # self.IOloop.loop.modify(fd, self.IOloop.EPOLLHUP)
                     else:
                         pass
-                        # print "发送数据：", msg, "客户端：", sock.getpeername()
-                        # 发送数据
-                        # sock.send(msg)
+
                 else:
-                    print "event:", event
+                    print "else event:", event
                     # 在epoll中注销服务端监听文件句柄
                     self.IOloop.loop.unregister(self.listensock.fileno())
                     # 关闭epoll
                     self.IOloop.loop.close()
                     # 关闭服务器socket
                     self.listensock.close()
-            pass
-        pass
+
 
 def process_request(server, fd, sock):
     data = sock.makefile("r")
