@@ -5,9 +5,7 @@ import sys
 from eventloop import eventLoop
 from utils import async
 import Queue
-
 from handle_pool import  ThreadPool
-
 
 handler_proto_event = {
     "IPPROTO_IP": [()],
@@ -135,7 +133,7 @@ class easyHttpServer(object):
             pass
         pass
 
-def process_request(self, fd, sock):
+def process_request(server, fd, sock):
     data = sock.makefile("r")
     first_line = data.readline()
     args = parse_request(first_line)
@@ -143,19 +141,27 @@ def process_request(self, fd, sock):
         method, path, version = args
         hearders = parse_headers(data)
     else:
-        self.IOloop.loop.modify(fd, self.IOloop.EPOLLHUP)
+        server.IOloop.loop.modify(fd, server.IOloop.EPOLLHUP)
     if first_line:
         print "收到请求：", first_line, "客户端：", sock.getpeername()
-        response = self.url_view[""]
-        self.__response[sock].put()
-        self.IOloop.loop.modify(fd, self.IOloop.EPOLLOUT)
+        response = server.url_view["/"]()
+        print "response:", response
+        server.__response[sock].put(response)
+        server.IOloop.loop.modify(fd, server.IOloop.EPOLLOUT)
     else:
-        self.IOloop.loop.modify(fd, self.IOloop.EPOLLHUP)
+        server.IOloop.loop.modify(fd, server.IOloop.EPOLLHUP)
 
-
-def process_response():
-    pass
-
+def process_response(server, fd, sock):
+    wfile = sock.makefile("w")
+    response = server.__response
+    httpline = "HTTP/1.1 200 OK\r\n"
+    response_headers = {
+        "Content-Length": len(server.__response[fd].get())
+    }
+    response = httpline + ''.join(['%s: %s\r\n' % (k, v) for k, v in response_headers.items()]) + '\r\n' + response
+    wfile.write(response)
+    print "response:", response
+    server.IOloop.loop.modify(fd, server.IOloop.EPOLLHUP)
 
 def parse_request(first_line):
     """Parse a request (internal).
@@ -226,29 +232,4 @@ def parse_headers(headerfile):
             break
         _headers.update({line.split(":")[0]: line.split(":")[1]})
     return _headers
-
-
-def start_response(self):
-
-    pass
-
-
-class esayLoop():
-    pass
-
-
-@async
-def my_accept(sock, proto, daemon=False):
-    while True:
-        conn_sock, addrinfo = sock.accept()
-        # proto_sock[str(proto)] = conn_sock
-        rf = conn_sock.makefile(mode="r")
-        line = rf.readline()
-        total_context = ""
-        total_context += context
-        while context != "\r\n":
-            context = rf.readline()
-            total_context += context
-            print total_context
-        print context, addrinfo
 
