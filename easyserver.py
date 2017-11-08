@@ -57,7 +57,7 @@ class easyHttpServer(object):
         self.listensock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 6)
         self.listensock.bind(addrs)
         self.listensock.listen(1)
-        self.url_view = Queue.Queue()
+        self.url_view = {}
         self.__response = {}
         self.init_url_view(self.url_view)
         self.fd_to_socket = {str(self.listensock.fileno()): self.listensock}
@@ -68,7 +68,7 @@ class easyHttpServer(object):
     def init_url_view(self, url_view_queue):
         from urls import URLMAPS
         for url, view_func in URLMAPS.items():
-            self.url_view.put((url, view_func))
+            self.url_view.update({url: view_func})
 
     def start(self):
         while True:
@@ -114,7 +114,7 @@ class easyHttpServer(object):
                     try:
                         # 从字典中获取对应客户端的信息
                         # msg = self.__response[sock].get_nowait()
-                        self.thread_pool.queueTask(process_response(), args=(self, fd, sock))
+                        self.thread_pool.queueTask(process_response, args=(self, fd, sock))
                     except Queue.Empty:
                         print sock.getpeername(), " queue empty"
                         # 修改文件句柄为读事件
@@ -138,10 +138,15 @@ class easyHttpServer(object):
 def process_request(self, fd, sock):
     data = sock.makefile("r")
     first_line = data.readline()
-    if parse_request(first_line):
-        parse_headers(data)
+    args = parse_request(first_line)
+    if args:
+        method, path, version = args
+        hearders = parse_headers(data)
+    else:
+        self.IOloop.loop.modify(fd, self.IOloop.EPOLLHUP)
     if first_line:
         print "收到请求：", first_line, "客户端：", sock.getpeername()
+        response = self.url_view[""]
         self.__response[sock].put()
         self.IOloop.loop.modify(fd, self.IOloop.EPOLLOUT)
     else:
@@ -206,8 +211,7 @@ def parse_request(first_line):
         return False
     else:
         easyHandler.send_error(400, "Bad request syntax (%r)" % requestline)
-        return command, path, version
-    return True
+    return command, path, version
 
 def parse_headers(headerfile):
     _headers = {}
@@ -222,6 +226,7 @@ def parse_headers(headerfile):
             break
         _headers.update({line.split(":")[0]: line.split(":")[1]})
     return _headers
+
 
 def start_response(self):
 
