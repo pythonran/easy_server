@@ -30,7 +30,7 @@ def main():
     addrs = parse_args()
     print addrs
     app = easyHttpServer((addrs[0], int(addrs[1])))
-    app.start()
+
 
 if __name__ == "__main__":
     main()
