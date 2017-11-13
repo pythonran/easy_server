@@ -1,5 +1,6 @@
 import threading
 import Queue
+import errno
 from time import sleep
 from threading import local
 
@@ -92,7 +93,7 @@ class ThreadPool(object):
             else:
                 return task
         except Exception as exc:
-            print str(exc)
+            # print "getNextTask: error:", str(exc)
             return (None, None, None)
 
 
@@ -151,7 +152,14 @@ class ThreadPoolThread(threading.Thread):
             if handle is None:
                 sleep(ThreadPoolThread.threadSleepTime)
             else:
-                handle(*args, **kwargs)
+                try:
+                    handle(*args, **kwargs)
+                except Exception as exc:
+                    if hasattr(exc, "errno"):
+                        if exc.errno == errno.EAGAIN:
+                            pass
+                    else:
+                        print self.name, " error:", exc
 
     def goAway(self):
 

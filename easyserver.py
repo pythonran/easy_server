@@ -1,6 +1,7 @@
 # coding=utf8
 import socket
 import os
+import time
 import sys
 from eventloop import eventLoop
 from utils import async
@@ -16,22 +17,43 @@ default_request_version = "HTTP/0.9"
 protocol_version = "HTTP/1.0"
 
 class easyRequest():
-    pass
+    def __init__(self, method, path, version, headers={}, body=""):
+        self.method = method.lower()
+        self.headers = headers
+        self._body = body
+        self.path = path
+        self.version = version
+
+    @property
+    def body(self):
+        try:
+            return eval(self._body)
+        except:
+            return self._body
+
+    __repr__ = lambda self: self.version
+
 
 class easyResponse():
-    def __init__(self, content_type, charset):
+    def __init__(self, body='', content_type="application/json", charset="utf-8"):
         self._headers = {}
         self._headers["Server"] = "easysever/1.0"
         self._headers["Content-type"] = content_type + ";" + charset
-        pass
+        self._headers["Content-Length"] = len(body)
+        self._body = body
 
-    __repr__ = lambda self: self._headers
     __getitem__ = lambda self, header: self._headers[header]
     __setitem__ = lambda self, header, value: self._headers.update(header=value)
 
     def set_cookie(self):
         pass
-    pass
+
+    @property
+    def response(self):
+        httpline = "HTTP/1.1 200 OK\r\n"
+        return httpline + ''.join(['%s: %s\r\n' % (k, v) for k, v in self._headers.items()]) + "\r\n" + self._body
+
+
 
 class easyHandler():
     @staticmethod
@@ -50,15 +72,14 @@ class easyHandler():
 
 class easyHttpServer(object):
 
-
     def __init__(self, addrs):
         self.listensock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 6)
         self.listensock.bind(addrs)
         self.listensock.listen(1)
         self.url_view = {}
-        self.__response = {}
+        self.response = {}
         self.init_url_view(self.url_view)
-        self.fd_to_socket = {str(self.listensock.fileno()): self.listensock}
+        self.fd_to_socket = {self.listensock.fileno(): self.listensock}
         self.IOloop = eventLoop(self.listensock)
         self.thread_pool = ThreadPool(2)
         self.start()
@@ -71,93 +92,66 @@ class easyHttpServer(object):
     def start(self):
         while True:
             print "等待活动连接......"
-            # 轮询注册的事件集合，返回值为[(文件句柄，对应的事件)，(...),....]
-            events = self.IOloop.loop.poll(10)
+            events = self.IOloop.poll(10)
             if not events:
                 print "epoll超时无活动连接，重新轮询......"
                 continue
             print "有", len(events), "个新事件，开始处理......"
             for fd, event in events:
-                sock = self.fd_to_socket[str(fd)]
-                # 如果活动socket为当前服务器socket，表示有新连接
+                sock = self.fd_to_socket[fd]
                 if sock == self.listensock:
                     connection, address = self.listensock.accept()
                     print "新连接：", address
-                    # 新连接socket设置为非阻塞
                     connection.setblocking(False)
-                    # 注册新连接fd到待读事件集合
-                    self.IOloop.loop.register(connection.fileno(), self.IOloop.EPOLLIN)
-                    # 把新连接的文件句柄以及对象保存到字典
+                    self.IOloop.add_event(connection.fileno(), self.IOloop.EPOLLIN)
                     self.fd_to_socket[connection.fileno()] = connection
-                    # 以新连接的对象为键值，值存储在队列中，保存每个连接的信息
-                    self.__response[connection] = Queue.Queue()
-                # 关闭事件
+                    self.response[connection.fileno()] = Queue.Queue()
                 elif event & self.IOloop.EPOLLHUP:
-                    print fd, 'client close'
-                    # 在epoll中注销客户端的文件句柄
-                    self.IOloop.loop.unregister(fd)
-                    # 关闭客户端的文件句柄
+                    print fd, 'EPOLLHUP'
+                    self.IOloop.remove_event(fd)
                     self.fd_to_socket[fd].close()
-                    # 在字典中删除与已关闭客户端相关的信息
                     del self.fd_to_socket[fd]
-                # 可读事件
-                elif event & self.IOloop.EPOLLIN:
-                    # 接收数据
-                    # data = sock.recv(1024)
-                    self.thread_pool.queueTask(process_request, args=(self, fd, sock))
 
-                # 可写事件
+                elif event & self.IOloop.EPOLLIN:
+                    print fd, 'EPOLLIN'
+                    self.thread_pool.queueTask(process_request, self, fd, sock)
+
                 elif event & self.IOloop.EPOLLOUT:
-                    try:
-                        # 从字典中获取对应客户端的信息
-                        # msg = self.__response[sock].get_nowait()
-                        self.thread_pool.queueTask(process_response, args=(self, fd, sock))
-                    except Queue.Empty:
-                        print sock.getpeername(), " queue empty"
-                        # 修改文件句柄为读事件
-                        # self.IOloop.loop.modify(fd, self.IOloop.EPOLLHUP)
-                    else:
-                        pass
+                    print fd, 'EPOLLOUT'
+                    self.thread_pool.queueTask(process_response, self, fd, sock)
 
                 else:
-                    print "else event:", event
-                    # 在epoll中注销服务端监听文件句柄
-                    self.IOloop.loop.unregister(self.listensock.fileno())
-                    # 关闭epoll
+                    print fd, "else event:", event
+                    self.IOloop.remove_event(self.listensock.fileno())
                     self.IOloop.loop.close()
-                    # 关闭服务器socket
                     self.listensock.close()
 
 
 def process_request(server, fd, sock):
-    data = sock.makefile("r")
-    first_line = data.readline()
-    args = parse_request(first_line)
-    if args:
-        method, path, version = args
-        hearders = parse_headers(data)
+    if fd in server.fd_to_socket.keys():
+        return
+    rfile = sock.makefile("r")
+    first_line = rfile.readline()
+    request = parse_request(first_line)
+    if request:
+        parse_headers(request, rfile)
     else:
-        server.IOloop.loop.modify(fd, server.IOloop.EPOLLHUP)
+        server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
     if first_line:
         print "收到请求：", first_line, "客户端：", sock.getpeername()
-        response = server.url_view["/"]()
-        print "response:", response
-        server.__response[sock].put(response)
-        server.IOloop.loop.modify(fd, server.IOloop.EPOLLOUT)
+        data = server.url_view["/"](request)
+        server.response[fd].put(data)
+        server.IOloop.update_event(fd, server.IOloop.EPOLLOUT)
     else:
-        server.IOloop.loop.modify(fd, server.IOloop.EPOLLHUP)
+        server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
+    rfile.close()
 
 def process_response(server, fd, sock):
-    wfile = sock.makefile("w")
-    response = server.__response
-    httpline = "HTTP/1.1 200 OK\r\n"
-    response_headers = {
-        "Content-Length": len(server.__response[fd].get())
-    }
-    response = httpline + ''.join(['%s: %s\r\n' % (k, v) for k, v in response_headers.items()]) + '\r\n' + response
-    wfile.write(response)
-    print "response:", response
-    server.IOloop.loop.modify(fd, server.IOloop.EPOLLHUP)
+    if fd in server.fd_to_socket.keys():
+        return
+    current_response = server.response[fd].get(block=False)
+    sock.sendall(current_response.response)
+    server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
 
 def parse_request(first_line):
     """Parse a request (internal).
@@ -173,9 +167,8 @@ def parse_request(first_line):
     command = None  # set in case of error on the first line
     request_version = version = default_request_version
     close_connection = 1
-    requestline = first_line
     path = ""
-    requestline = requestline.rstrip('\r\n')
+    requestline = first_line.rstrip('\r\n')
     words = requestline.split()
     if len(words) == 3:
         command, path, version = words
@@ -201,7 +194,7 @@ def parse_request(first_line):
             close_connection = 0
         if version_number >= (2, 0):
             easyHandler.send_error(505,
-                            "Invalid HTTP Version (%s)" % base_version_number)
+                                   "Invalid HTTP Version (%s)" % base_version_number)
             return False
     elif len(words) == 2:
         command, path = words
@@ -213,19 +206,19 @@ def parse_request(first_line):
         return False
     else:
         easyHandler.send_error(400, "Bad request syntax (%r)" % requestline)
-    return command, path, version
+    return easyRequest(command, path, version)
 
-def parse_headers(headerfile):
-    _headers = {}
+
+def parse_headers(request, headerfile):
     line = headerfile.readline()
     if line == "\r\n" or not line:
         return False
-    _headers.update({line.split(":")[0]: line.split(":")[1]})
+    request.headers[line.split(":")[0]] = line.split(":")[1]
     while True:
         line = headerfile.readline()
-        print line.split(":")
+        # print line.split(":")
         if line == "\r\n" or not line:
             break
-        _headers.update({line.split(":")[0]: line.split(":")[1]})
-    return _headers
+        request.headers[line.split(":")[0]] = line.split(":")[1]
+
 

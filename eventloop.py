@@ -46,10 +46,6 @@ class eventLoop(object):
         if sock:
             self.add_event(sock.fileno(), self.EPOLLIN)
 
-    def __call__(self, *args, **kwargs):
-
-        pass
-
     def add_event(self, fd, event):
         self.loop.register(fd, event)
 
@@ -58,6 +54,9 @@ class eventLoop(object):
 
     def remove_event(self, fd):
         self.loop.unregister(fd)
+
+    def poll(self, timeout):
+        return self.loop.poll(timeout)
 
 if __name__ == "__main__":
     loop = eventLoop()

@@ -78,10 +78,10 @@ class View(object):
         """
         Handles responding to requests for the OPTIONS HTTP verb.
         """
-        response = easyResponse()
-        response['Allow'] = ', '.join(self._allowed_methods())
-        response['Content-Length'] = '0'
-        return response
+        easy = easyResponse()
+        easy._headers['Allow'] = ', '.join(self._allowed_methods())
+        easy['Content-Length'] = '0'
+        return easy.response
 
     def _allowed_methods(self):
         return [m.upper() for m in self.http_method_names if hasattr(self, m)]
