@@ -7,19 +7,16 @@ from eventloop import eventLoop
 from utils import async
 import Queue
 from handle_pool import  ThreadPool
+from http_code import code_status
 
-handler_proto_event = {
-    "IPPROTO_IP": [()],
-
-}
 
 default_request_version = "HTTP/0.9"
 protocol_version = "HTTP/1.0"
 
 class easyRequest():
-    def __init__(self, method, path, version, headers={}, body=""):
+    def __init__(self, method, path, version, body=""):
         self.method = method.lower()
-        self.headers = headers
+        self.headers = {}
         self._body = body
         self.path = path
         self.version = version
@@ -35,11 +32,12 @@ class easyRequest():
 
 
 class easyResponse():
-    def __init__(self, body='', content_type="application/json", charset="utf-8"):
-        self._headers = {}
-        self._headers["Server"] = "easysever/1.0"
-        self._headers["Content-type"] = content_type + ";" + charset
-        self._headers["Content-Length"] = len(body)
+    def __init__(self, body='', content_type="application/json", charset="utf-8", code=200):
+        self.headers = {}
+        self.code = str(code)
+        self.headers["Server"] = "easysever/1.0"
+        self.headers["Content-type"] = content_type + ";" + charset
+        self.headers["Content-Length"] = len(body)
         self._body = body
 
     __getitem__ = lambda self, header: self._headers[header]
@@ -50,9 +48,8 @@ class easyResponse():
 
     @property
     def response(self):
-        httpline = "HTTP/1.1 200 OK\r\n"
-        return httpline + ''.join(['%s: %s\r\n' % (k, v) for k, v in self._headers.items()]) + "\r\n" + self._body
-
+        httpline = "HTTP/1.1 %s %s\r\n" % (self.code, code_status[self.code])
+        return httpline + ''.join(['%s: %s\r\n' % (k, v) for k, v in self.headers.items()]) + "\r\n" + self._body
 
 
 class easyHandler():
@@ -60,20 +57,19 @@ class easyHandler():
     def send_error(code, response):
         pass
 
-    def method_notallowed(self):
-        """
-
-        :rtype: object
-        """
+    @classmethod
+    def method_notallowed(cls, request):
         status_code = 405
-        return ""
-        pass
+        cur_response = easyResponse()
+        cur_response.headers["Allow"] = 'Method Not Allowed (%s): %s' % (request.method, request.path)
+        return cur_response.response
 
 
 class easyHttpServer(object):
 
     def __init__(self, addrs):
         self.listensock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 6)
+        self.listensock.setblocking(False)
         self.listensock.bind(addrs)
         self.listensock.listen(1)
         self.url_view = {}
@@ -115,10 +111,12 @@ class easyHttpServer(object):
 
                 elif event & self.IOloop.EPOLLIN:
                     print fd, 'EPOLLIN'
+                    self.IOloop.remove_event(fd)
                     self.thread_pool.queueTask(process_request, self, fd, sock)
 
                 elif event & self.IOloop.EPOLLOUT:
                     print fd, 'EPOLLOUT'
+                    self.IOloop.remove_event(fd)
                     self.thread_pool.queueTask(process_response, self, fd, sock)
 
                 else:
@@ -129,10 +127,11 @@ class easyHttpServer(object):
 
 
 def process_request(server, fd, sock):
-    uid = str(fd) + str(server.IOloop.EPOLLIN)
-    if uid in server.processing:
-        return
-    server.processing.add(uid)
+    # uid = str(fd) + str(server.IOloop.EPOLLIN)
+    # if uid in server.processing:
+    #     return
+    # server.processing.add(uid)
+
     rfile = sock.makefile("r")
     first_line = rfile.readline()
     request = parse_request(first_line)
@@ -143,22 +142,22 @@ def process_request(server, fd, sock):
     if first_line:
         print "收到请求：", first_line, "客户端：", sock.getpeername()
         data = server.url_view["/"](request)
-        server.processing.discard(uid)
+        # server.processing.discard(uid)
         server.response[fd].put(data)
-        server.IOloop.update_event(fd, server.IOloop.EPOLLOUT)
+        server.IOloop.add_event(fd, server.IOloop.EPOLLOUT)
     else:
-        server.processing.discard(uid)
-        server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
+        # server.processing.discard(uid)
+        server.IOloop.add_event(fd, server.IOloop.EPOLLHUP)
     rfile.close()
 
 def process_response(server, fd, sock):
-    uid = str(fd) + str(server.IOloop.EPOLLOUT)
-    if uid in server.processing:
-        return
+    # uid = str(fd) + str(server.IOloop.EPOLLOUT)
+    # if uid in server.processing:
+    #     return
     current_response = server.response[fd].get(block=False)
     sock.sendall(current_response.response)
-    server.processing.discard(uid)
-    server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
+    # server.processing.discard(uid)
+    server.IOloop.add_event(fd, server.IOloop.EPOLLHUP)
 
 def parse_request(first_line):
     """Parse a request (internal).

@@ -72,7 +72,7 @@ class View(object):
             'Method Not Allowed (%s): %s', request.method, request.path,
             extra={'status_code': 405, 'request': request}
         )
-        return easyHandler.method_notallowed()
+        return easyHandler.method_notallowed(request)
 
     def options(self, request, *args, **kwargs):
         """
