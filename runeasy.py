@@ -1,7 +1,4 @@
 # -*- coding:utf-8 -*-
-import select
-import Queue
-import socket
 import re
 from argparse import ArgumentParser
 from easyserver import easyHttpServer
@@ -24,13 +21,11 @@ def parse_args():
         address = "0.0.0.0:8000"
     address = re.match(naiveip_re, address)
     address =  address.groupdict()
-    return address["addr"], address["port"]
+    return address["addr"], int(address["port"])
 
 def main():
-    addrs = parse_args()
-    print addrs
-    app = easyHttpServer((addrs[0], int(addrs[1])))
-
+    app = easyHttpServer(parse_args())
+    app.start()
 
 if __name__ == "__main__":
     main()

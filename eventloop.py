@@ -35,13 +35,13 @@ class eventLoop(object):
     def __init__(self, sock=None):
         self.loop = None
         if hasattr(select, "epoll"):
-            print "now in epoll"
+            print "According to the platform, chose epoll as IO multiplexing...\n"
             self.loop = select.epoll()
         elif hasattr(select, "kqueue"):
-            print "now in kqueue"
+            print "According to the platform, chose kqueue as IO multiplexing...\n"
             self.loop = _kqueue._KQueue()
         else:
-            print "now in select"
+            print "According to the platform, chose select as IO multiplexing...\n"
             self.loop = _select._Select()
         if sock:
             self.add_event(sock.fileno(), self.EPOLLIN)
@@ -60,6 +60,4 @@ class eventLoop(object):
 
 if __name__ == "__main__":
     loop = eventLoop()
-
-    loop()
     pass

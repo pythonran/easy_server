@@ -1,11 +1,11 @@
 # coding=utf8
-import socket
 import os
-import time
 import sys
-from eventloop import eventLoop
-from utils import async
+import socket
 import Queue
+import errno
+import datetime
+from eventloop import eventLoop
 from handle_pool import  ThreadPool
 from http_code import code_status
 
@@ -68,10 +68,12 @@ class easyHandler():
 class easyHttpServer(object):
 
     def __init__(self, addrs):
-        self.listensock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 6)
+        self.listensock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
         self.listensock.setblocking(False)
+        self.listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listensock.bind(addrs)
         self.listensock.listen(1)
+        self.addrs = addrs
         self.url_view = {}
         self.response = {}
         self.init_url_view(self.url_view)
@@ -79,85 +81,104 @@ class easyHttpServer(object):
         self.processing = set()
         self.IOloop = eventLoop(self.listensock)
         self.thread_pool = ThreadPool(2)
-        self.start()
+        self.exit_msg = "\r\nBye!\r\n"
 
     def init_url_view(self, url_view_queue):
         from urls import URLMAPS
         for url, view_func in URLMAPS.items():
             self.url_view.update({url: view_func})
 
+    def prity_print(self):
+        print "Server at http://%s:%d/" % self.addrs
+        print "Quit the server with CONTROL-C."
+
     def start(self):
-        while True:
-            print "等待活动连接......"
-            events = self.IOloop.poll(10)
-            if not events:
-                print "epoll超时无活动连接，重新轮询......"
-                continue
-            print "有", len(events), "个新事件，开始处理......"
-            for fd, event in events:
-                sock = self.fd_to_socket[fd]
-                if sock == self.listensock:
-                    connection, address = self.listensock.accept()
-                    print "新连接：", address
-                    connection.setblocking(False)
-                    self.IOloop.add_event(connection.fileno(), self.IOloop.EPOLLIN)
-                    self.fd_to_socket[connection.fileno()] = connection
-                    self.response[connection.fileno()] = Queue.Queue()
-                elif event & self.IOloop.EPOLLHUP:
-                    print fd, 'EPOLLHUP'
-                    self.IOloop.remove_event(fd)
-                    self.fd_to_socket[fd].close()
-                    del self.fd_to_socket[fd]
+        self.prity_print()
+        try:
+            while True:
+                # print"等待活动连接......"
+                events = self.IOloop.poll(10)
+                if not events:
+                    # print"epoll超时无活动连接，重新轮询......"
+                    continue
+                # print"有", len(events), "个新事件，开始处理......"
+                for fd, event in events:
+                    sock = self.fd_to_socket[fd]
+                    if sock == self.listensock:
+                        connection, address = self.listensock.accept()
+                        # print"新连接：", address
+                        connection.setblocking(False)
+                        self.IOloop.add_event(connection.fileno(), self.IOloop.EPOLLIN)
+                        self.fd_to_socket[connection.fileno()] = connection
+                        self.response[connection.fileno()] = Queue.Queue()
+                    elif event & self.IOloop.EPOLLHUP:
+                        # printfd, 'EPOLLHUP'
+                        self.IOloop.remove_event(fd)
+                        self.fd_to_socket[fd].close()
+                        del self.fd_to_socket[fd]
+                        del self.response[fd]
 
-                elif event & self.IOloop.EPOLLIN:
-                    print fd, 'EPOLLIN'
-                    self.IOloop.remove_event(fd)
-                    self.thread_pool.queueTask(process_request, self, fd, sock)
+                    elif event & self.IOloop.EPOLLIN:
+                        # printfd, 'EPOLLIN'
+                        self.IOloop.remove_event(fd)
+                        self.thread_pool.queueTask(process_request, self, fd, sock)
 
-                elif event & self.IOloop.EPOLLOUT:
-                    print fd, 'EPOLLOUT'
-                    self.IOloop.remove_event(fd)
-                    self.thread_pool.queueTask(process_response, self, fd, sock)
+                    elif event & self.IOloop.EPOLLOUT:
+                        # printfd, 'EPOLLOUT'
+                        self.IOloop.remove_event(fd)
+                        self.thread_pool.queueTask(process_response, self, fd, sock)
 
-                else:
-                    print fd, "else event:", event
-                    self.IOloop.remove_event(self.listensock.fileno())
-                    self.IOloop.loop.close()
-                    self.listensock.close()
-
+                    else:
+                        # printfd, "else event:", event
+                        self.IOloop.remove_event(self.listensock.fileno())
+                        self.IOloop.loop.close()
+                        self.listensock.close()
+        except socket.error as e:
+            ERRORS = {
+                errno.EACCES: "main You don't have permission to access that port.",
+                errno.EADDRINUSE: "main That port is already in use.",
+                errno.EADDRNOTAVAIL: "main That IP address can't be assigned to.",
+                errno.EAGAIN: "main errno.EAGAIN"
+            }
+            try:
+                error_text = ERRORS[e.errno]
+                print "main error_text:",error_text
+            except KeyError:
+                print "main Error: %s" % str(e)
+            sys.exit(1)
+        except KeyboardInterrupt as err:
+            for fd, sock in self.fd_to_socket.items():
+                sock.close()
+                if self.response.has_key(fd):
+                    del self.response[fd]
+            self.thread_pool.setThreadCount(0)
+            sys.exit(self.exit_msg)
 
 def process_request(server, fd, sock):
-    # uid = str(fd) + str(server.IOloop.EPOLLIN)
-    # if uid in server.processing:
-    #     return
-    # server.processing.add(uid)
-
     rfile = sock.makefile("r")
     first_line = rfile.readline()
     request = parse_request(first_line)
+    t = datetime.datetime.now()
+    time_string = datetime.datetime.strftime(t, '%Y-%m-%d %H:%M:%S')
     if request:
         parse_headers(request, rfile)
     else:
         server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
     if first_line:
-        print "收到请求：", first_line, "客户端：", sock.getpeername()
         data = server.url_view["/"](request)
-        # server.processing.discard(uid)
         server.response[fd].put(data)
         server.IOloop.add_event(fd, server.IOloop.EPOLLOUT)
+        print '''<{time}> "{method} {path} {version}" {code} {length}'''.format(time=time_string, method=request.method.upper(),
+                path=request.path, version=request.version,code=data.code, length=len(data._body))
     else:
-        # server.processing.discard(uid)
         server.IOloop.add_event(fd, server.IOloop.EPOLLHUP)
     rfile.close()
 
 def process_response(server, fd, sock):
-    # uid = str(fd) + str(server.IOloop.EPOLLOUT)
-    # if uid in server.processing:
-    #     return
     current_response = server.response[fd].get(block=False)
     sock.sendall(current_response.response)
-    # server.processing.discard(uid)
     server.IOloop.add_event(fd, server.IOloop.EPOLLHUP)
+    sock.close()
 
 def parse_request(first_line):
     """Parse a request (internal).
@@ -170,7 +191,7 @@ def parse_request(first_line):
                 error is sent back.
 
     """
-    command = None  # set in case of error on the first line
+    command = None
     request_version = version = default_request_version
     close_connection = 1
     path = ""
@@ -184,12 +205,6 @@ def parse_request(first_line):
         try:
             base_version_number = version.split('/', 1)[1]
             version_number = base_version_number.split(".")
-            # RFC 2145 section 3.1 says there can be only one "." and
-            #   - major and minor numbers MUST be treated as
-            #      separate integers;
-            #   - HTTP/2.4 is a lower version than HTTP/2.13, which in
-            #      turn is lower than HTTP/12.3;
-            #   - Leading zeros MUST be ignored by recipients.
             if len(version_number) != 2:
                 raise ValueError
             version_number = int(version_number[0]), int(version_number[1])
@@ -214,7 +229,6 @@ def parse_request(first_line):
         easyHandler.send_error(400, "Bad request syntax (%r)" % requestline)
     return easyRequest(command, path, version)
 
-
 def parse_headers(request, headerfile):
     line = headerfile.readline()
     if line == "\r\n" or not line:
@@ -222,7 +236,6 @@ def parse_headers(request, headerfile):
     request.headers[line.split(":")[0]] = line.split(":")[1]
     while True:
         line = headerfile.readline()
-        # print line.split(":")
         if line == "\r\n" or not line:
             break
         request.headers[line.split(":")[0]] = line.split(":")[1]

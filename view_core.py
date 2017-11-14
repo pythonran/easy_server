@@ -79,7 +79,7 @@ class View(object):
         Handles responding to requests for the OPTIONS HTTP verb.
         """
         easy = easyResponse()
-        easy._headers['Allow'] = ', '.join(self._allowed_methods())
+        easy.headers['Allow'] = ', '.join(self._allowed_methods())
         easy['Content-Length'] = '0'
         return easy.response
 

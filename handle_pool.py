@@ -1,10 +1,15 @@
-import threading
+# auth: xRan
+# coding=utf8
+
+import os
+import sys
 import Queue
 import errno
+import socket
+import threading
 from time import sleep
 from threading import local
 
-_request = local()
 
 class ThreadPool(object):
     """Flexible thread pool class.  Creates a pool of threads, then
@@ -153,13 +158,27 @@ class ThreadPoolThread(threading.Thread):
                 sleep(ThreadPoolThread.threadSleepTime)
             else:
                 try:
+                    self.server, self.fd, self.sock = args
                     handle(*args, **kwargs)
+                except socket.error as e:
+                    # Use helpful error messages instead of ugly tracebacks.
+                    ERRORS = {
+                        errno.EACCES: "You don't have permission to access that port.",
+                        errno.EADDRINUSE: "That port is already in use.",
+                        errno.EADDRNOTAVAIL: "That IP address can't be assigned to.",
+                        errno.EAGAIN: "Resource temporarily unavailable"
+                    }
+                    try:
+                        error_text = ERRORS[e.errno]
+                        print error_text
+                    except KeyError:
+                        print "Error: %s" % str(e)
                 except Exception as exc:
-                    if hasattr(exc, "errno"):
-                        if exc.errno == errno.EAGAIN:
-                            pass
-                    else:
-                        print self.name, " error:", exc
+                    print str(exc), "will clear thread stack"
+                    self.sock.close()
+                    if self.server.response.has_key(self.fd):
+                        del self.server.response[self.fd]
+
 
     def goAway(self):
 
