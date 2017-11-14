@@ -2,6 +2,7 @@ import os
 import select
 import tox
 from utils import Configurable
+from loop import _kqueue, _select
 
 class eventLoop(object):
     EPOLLERR = 8
@@ -31,23 +32,31 @@ class eventLoop(object):
     POLLWRBAND = 512
     POLLWRNORM = 256
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, sock=None):
         self.loop = None
         if hasattr(select, "epoll"):
-            self.loop = select.epoll
-        elif hasattr(select, "poll"):
-            self.loop = select.poll
+            print "now in epoll"
+            self.loop = select.epoll()
+        elif hasattr(select, "kqueue"):
+            print "now in kqueue"
+            self.loop = _kqueue._KQueue()
         else:
-            self.loop = select.select
-
-    def __call__(self, *args, **kwargs):
-
-        pass
+            print "now in select"
+            self.loop = _select._Select()
+        if sock:
+            self.add_event(sock.fileno(), self.EPOLLIN)
 
     def add_event(self, fd, event):
-        event_loop = self.loop()
-        event_loop.register(fd, event)
-        pass
+        self.loop.register(fd, event)
+
+    def update_event(self, fd, event):
+        self.loop.modify(fd, event)
+
+    def remove_event(self, fd):
+        self.loop.unregister(fd)
+
+    def poll(self, timeout):
+        return self.loop.poll(timeout)
 
 if __name__ == "__main__":
     loop = eventLoop()
