@@ -80,6 +80,7 @@ class easyHttpServer(object):
         self.response = {}
         self.init_url_view(self.url_view)
         self.fd_to_socket = {self.listensock.fileno(): self.listensock}
+        self.processing = set()
         self.IOloop = eventLoop(self.listensock)
         self.thread_pool = ThreadPool(2)
         self.start()
@@ -128,8 +129,10 @@ class easyHttpServer(object):
 
 
 def process_request(server, fd, sock):
-    if fd in server.fd_to_socket.keys():
+    uid = str(fd) + str(server.IOloop.EPOLLIN)
+    if uid in server.processing:
         return
+    server.processing.add(uid)
     rfile = sock.makefile("r")
     first_line = rfile.readline()
     request = parse_request(first_line)
@@ -140,17 +143,21 @@ def process_request(server, fd, sock):
     if first_line:
         print "收到请求：", first_line, "客户端：", sock.getpeername()
         data = server.url_view["/"](request)
+        server.processing.discard(uid)
         server.response[fd].put(data)
         server.IOloop.update_event(fd, server.IOloop.EPOLLOUT)
     else:
+        server.processing.discard(uid)
         server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
     rfile.close()
 
 def process_response(server, fd, sock):
-    if fd in server.fd_to_socket.keys():
+    uid = str(fd) + str(server.IOloop.EPOLLOUT)
+    if uid in server.processing:
         return
     current_response = server.response[fd].get(block=False)
     sock.sendall(current_response.response)
+    server.processing.discard(uid)
     server.IOloop.update_event(fd, server.IOloop.EPOLLHUP)
 
 def parse_request(first_line):
